@@ -67,6 +67,9 @@ const std::string& MPIRequest::RequestType_Name(RequestType value) {
   case RequestType::BROADCAST:
     static const std::string broadcast("BROADCAST");
     return broadcast;
+  case RequestType::REDUCE:
+    static const std::string reduce("REDUCE");
+    return reduce;
   default:
     static const std::string unknown("<unknown>");
     return unknown;
@@ -113,6 +116,14 @@ void MPIRequest::add_tensor_shape(int64_t value) {
   tensor_shape_.push_back(value);
 }
 
+const std::vector<int32_t>& MPIRequest::ranks() const {
+  return ranks_;
+}
+
+void MPIRequest::set_ranks(const std::vector<int32_t>& value) {
+  ranks_ = value;
+}
+
 namespace {
 
 void MPIRequest_ParseFromWire(MPIRequest& request,
@@ -125,6 +136,8 @@ void MPIRequest_ParseFromWire(MPIRequest& request,
   request.set_device(obj->device());
   request.set_tensor_shape(std::vector<int64_t>(obj->tensor_shape()->begin(),
                                                 obj->tensor_shape()->end()));
+  request.set_ranks(std::vector<int32_t>(obj->ranks()->begin(),
+                                         obj->ranks()->end()));
 }
 
 void MPIRequest_SerializeToWire(const MPIRequest& request,
@@ -138,6 +151,8 @@ void MPIRequest_SerializeToWire(const MPIRequest& request,
   request_builder.add_tensor_name(builder.CreateString(request.tensor_name()));
   request_builder.add_root_rank(request.root_rank());
   request_builder.add_device(request.device());
+  request_builder.add_ranks(
+    builder.CreateVector(request.ranks()));
   request_builder.add_tensor_shape(
       builder.CreateVector(request.tensor_shape()));
   obj = request_builder.Finish();
@@ -226,6 +241,9 @@ const std::string& MPIResponse::ResponseType_Name(ResponseType value) {
   case ResponseType::BROADCAST:
     static const std::string broadcast("BROADCAST");
     return broadcast;
+  case ResponseType::REDUCE:
+    static const std::string reduce("REDUCE");
+    return reduce;
   case ResponseType::ERROR:
     static const std::string error("ERROR");
     return error;
@@ -286,6 +304,15 @@ void MPIResponse::set_tensor_sizes(const std::vector<int64_t>& value) {
 void MPIResponse::add_tensor_sizes(int64_t value) {
   tensor_sizes_.push_back(value);
 }
+
+const std::vector<int32_t>& MPIResponse::ranks() const {
+  return ranks_;
+}
+
+void MPIResponse::set_ranks(const std::vector<int32_t>& value) {
+  ranks_ = value;
+}
+
 
 void MPIResponse::ParseFromString(MPIResponse& response,
                                   const std::string& input) {

@@ -277,6 +277,7 @@ public:
   explicit HorovodReduceOp(OpKernelConstruction* context)
       : AsyncOpKernel(context) {
         OP_REQUIRES_OK(context, context->GetAttr("ranks", &ranks_));
+        std::cout << "ranks ";
         for (std::vector<int32>::const_iterator it = ranks_.begin(); it != ranks_.end(); ++it) {
           std::cout << std::to_string(*it) << " ";
         }

@@ -42,7 +42,7 @@ const std::string& MPIDataType_Name(MPIDataType value);
 // the rank wants to do and the tensor that it wants to apply the operation to.
 class MPIRequest {
 public:
-  enum RequestType { ALLREDUCE = 0, ALLGATHER = 1, BROADCAST = 2 };
+  enum RequestType { ALLREDUCE = 0, ALLGATHER = 1, BROADCAST = 2 , REDUCE = 3};
 
   static const std::string& RequestType_Name(RequestType value);
 
@@ -71,6 +71,9 @@ public:
   void set_tensor_shape(const std::vector<int64_t>& value);
   void add_tensor_shape(int64_t value);
 
+  const std::vector<int32_t>& ranks() const;
+  void set_ranks(const std::vector<int32_t>& value);
+
   static void ParseFromString(MPIRequest& request, const std::string& input);
   static void SerializeToString(MPIRequest& request, std::string& output);
 
@@ -82,6 +85,7 @@ private:
   int32_t device_;
   std::string tensor_name_;
   std::vector<int64_t> tensor_shape_;
+  std::vector<int32_t> ranks_;
 };
 
 class MPIRequestList {
@@ -115,9 +119,10 @@ public:
     ALLREDUCE = 0,
     ALLGATHER = 1,
     BROADCAST = 2,
-    ERROR = 3,
-    DONE = 4,
-    SHUTDOWN = 5
+    REDUCE = 3,
+    ERROR = 4,
+    DONE = 5,
+    SHUTDOWN = 6
   };
 
   static const std::string& ResponseType_Name(ResponseType value);
@@ -145,6 +150,11 @@ public:
   void set_tensor_sizes(const std::vector<int64_t>& value);
   void add_tensor_sizes(int64_t value);
 
+  // Empty unless response_type is REDUCE.
+  // These are the ranks which will perform this operation.
+  const std::vector<int32_t>& ranks() const;
+  void set_ranks(const std::vector<int32_t>& value);
+
   static void ParseFromString(MPIResponse& response, const std::string& input);
   static void SerializeToString(MPIResponse& response, std::string& output);
 
@@ -154,6 +164,7 @@ private:
   std::string error_message_;
   std::vector<int32_t> devices_;
   std::vector<int64_t> tensor_sizes_;
+  std::vector<int32_t> ranks_;
 };
 
 } // namespace common

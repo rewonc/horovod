@@ -70,8 +70,9 @@ enum MPIRequestType {
   MPIRequestType_ALLREDUCE = 0,
   MPIRequestType_ALLGATHER = 1,
   MPIRequestType_BROADCAST = 2,
+  MPIRequestType_REDUCE = 3,
   MPIRequestType_MIN = MPIRequestType_ALLREDUCE,
-  MPIRequestType_MAX = MPIRequestType_BROADCAST
+  MPIRequestType_MAX = MPIRequestType_REDUCE
 };
 
 inline const char **EnumNamesMPIRequestType() {
@@ -79,6 +80,7 @@ inline const char **EnumNamesMPIRequestType() {
     "ALLREDUCE",
     "ALLGATHER",
     "BROADCAST",
+    "REDUCE",
     nullptr
   };
   return names;
@@ -93,9 +95,10 @@ enum MPIResponseType {
   MPIResponseType_ALLREDUCE = 0,
   MPIResponseType_ALLGATHER = 1,
   MPIResponseType_BROADCAST = 2,
-  MPIResponseType_ERROR = 3,
-  MPIResponseType_DONE = 4,
-  MPIResponseType_SHUTDOWN = 5,
+  MPIResponseType_REDUCE = 3,
+  MPIResponseType_ERROR = 4,
+  MPIResponseType_DONE = 5,
+  MPIResponseType_SHUTDOWN = 6,
   MPIResponseType_MIN = MPIResponseType_ALLREDUCE,
   MPIResponseType_MAX = MPIResponseType_SHUTDOWN
 };
@@ -105,6 +108,7 @@ inline const char **EnumNamesMPIResponseType() {
     "ALLREDUCE",
     "ALLGATHER",
     "BROADCAST",
+    "REDUCE",
     "ERROR",
     "DONE",
     "SHUTDOWN",
@@ -126,7 +130,8 @@ struct MPIRequest FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
     VT_TENSOR_NAME = 10,
     VT_ROOT_RANK = 12,
     VT_DEVICE = 14,
-    VT_TENSOR_SHAPE = 16
+    VT_TENSOR_SHAPE = 16,
+    VT_RANKS = 18
   };
   int32_t request_rank() const {
     return GetField<int32_t>(VT_REQUEST_RANK, 0);
@@ -149,6 +154,9 @@ struct MPIRequest FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   const flatbuffers::Vector<int64_t> *tensor_shape() const {
     return GetPointer<const flatbuffers::Vector<int64_t> *>(VT_TENSOR_SHAPE);
   }
+  const flatbuffers::Vector<int32_t> *ranks() const {
+    return GetPointer<const flatbuffers::Vector<int32_t> *>(VT_RANKS);
+  }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<int32_t>(verifier, VT_REQUEST_RANK) &&
@@ -160,6 +168,7 @@ struct MPIRequest FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
            VerifyField<int32_t>(verifier, VT_DEVICE) &&
            VerifyField<flatbuffers::uoffset_t>(verifier, VT_TENSOR_SHAPE) &&
            verifier.Verify(tensor_shape()) &&
+           verifier.Verify(ranks()) &&
            verifier.EndTable();
   }
 };
@@ -188,13 +197,16 @@ struct MPIRequestBuilder {
   void add_tensor_shape(flatbuffers::Offset<flatbuffers::Vector<int64_t>> tensor_shape) {
     fbb_.AddOffset(MPIRequest::VT_TENSOR_SHAPE, tensor_shape);
   }
+  void add_ranks(flatbuffers::Offset<flatbuffers::Vector<int32_t>> ranks) {
+    fbb_.AddOffset(MPIRequest::VT_RANKS, ranks);
+  }
   MPIRequestBuilder(flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
   MPIRequestBuilder &operator=(const MPIRequestBuilder &);
   flatbuffers::Offset<MPIRequest> Finish() {
-    const auto end = fbb_.EndTable(start_, 7);
+    const auto end = fbb_.EndTable(start_, 8);
     auto o = flatbuffers::Offset<MPIRequest>(end);
     return o;
   }
@@ -208,9 +220,11 @@ inline flatbuffers::Offset<MPIRequest> CreateMPIRequest(
     flatbuffers::Offset<flatbuffers::String> tensor_name = 0,
     int32_t root_rank = 0,
     int32_t device = 0,
-    flatbuffers::Offset<flatbuffers::Vector<int64_t>> tensor_shape = 0) {
+    flatbuffers::Offset<flatbuffers::Vector<int64_t>> tensor_shape = 0,
+    flatbuffers::Offset<flatbuffers::Vector<int32_t>> ranks = 0) {
   MPIRequestBuilder builder_(_fbb);
   builder_.add_tensor_shape(tensor_shape);
+  builder_.add_ranks(ranks);
   builder_.add_device(device);
   builder_.add_root_rank(root_rank);
   builder_.add_tensor_name(tensor_name);
@@ -228,7 +242,8 @@ inline flatbuffers::Offset<MPIRequest> CreateMPIRequestDirect(
     const char *tensor_name = nullptr,
     int32_t root_rank = 0,
     int32_t device = 0,
-    const std::vector<int64_t> *tensor_shape = nullptr) {
+    const std::vector<int64_t> *tensor_shape = nullptr,
+    const std::vector<int32_t> *ranks = nullptr) {
   return horovod::common::wire::CreateMPIRequest(
       _fbb,
       request_rank,
@@ -237,7 +252,8 @@ inline flatbuffers::Offset<MPIRequest> CreateMPIRequestDirect(
       tensor_name ? _fbb.CreateString(tensor_name) : 0,
       root_rank,
       device,
-      tensor_shape ? _fbb.CreateVector<int64_t>(*tensor_shape) : 0);
+      tensor_shape ? _fbb.CreateVector<int64_t>(*tensor_shape) : 0,
+      ranks ? _fbb.CreateVector<int32_t>(*ranks) : 0);
 }
 
 struct MPIRequestList FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
@@ -308,7 +324,8 @@ struct MPIResponse FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
     VT_TENSOR_NAMES = 6,
     VT_ERROR_MESSAGE = 8,
     VT_DEVICES = 10,
-    VT_TENSOR_SIZES = 12
+    VT_TENSOR_SIZES = 12,
+    VT_RANKS = 14,
   };
   MPIResponseType response_type() const {
     return static_cast<MPIResponseType>(GetField<int8_t>(VT_RESPONSE_TYPE, 0));
@@ -325,6 +342,9 @@ struct MPIResponse FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   const flatbuffers::Vector<int64_t> *tensor_sizes() const {
     return GetPointer<const flatbuffers::Vector<int64_t> *>(VT_TENSOR_SIZES);
   }
+  const flatbuffers::Vector<int32_t> *ranks() const {
+    return GetPointer<const flatbuffers::Vector<int32_t> *>(VT_RANKS);
+  }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<int8_t>(verifier, VT_RESPONSE_TYPE) &&
@@ -337,6 +357,7 @@ struct MPIResponse FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
            verifier.Verify(devices()) &&
            VerifyField<flatbuffers::uoffset_t>(verifier, VT_TENSOR_SIZES) &&
            verifier.Verify(tensor_sizes()) &&
+           verifier.Verify(ranks()) &&
            verifier.EndTable();
   }
 };
@@ -359,13 +380,16 @@ struct MPIResponseBuilder {
   void add_tensor_sizes(flatbuffers::Offset<flatbuffers::Vector<int64_t>> tensor_sizes) {
     fbb_.AddOffset(MPIResponse::VT_TENSOR_SIZES, tensor_sizes);
   }
+  void add_ranks(flatbuffers::Offset<flatbuffers::Vector<int32_t>> ranks) {
+    fbb_.AddOffset(MPIResponse::VT_RANKS, ranks);
+  }
   MPIResponseBuilder(flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
   MPIResponseBuilder &operator=(const MPIResponseBuilder &);
   flatbuffers::Offset<MPIResponse> Finish() {
-    const auto end = fbb_.EndTable(start_, 5);
+    const auto end = fbb_.EndTable(start_, 6);
     auto o = flatbuffers::Offset<MPIResponse>(end);
     return o;
   }
@@ -377,8 +401,10 @@ inline flatbuffers::Offset<MPIResponse> CreateMPIResponse(
     flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>>> tensor_names = 0,
     flatbuffers::Offset<flatbuffers::String> error_message = 0,
     flatbuffers::Offset<flatbuffers::Vector<int32_t>> devices = 0,
-    flatbuffers::Offset<flatbuffers::Vector<int64_t>> tensor_sizes = 0) {
+    flatbuffers::Offset<flatbuffers::Vector<int64_t>> tensor_sizes = 0,
+    flatbuffers::Offset<flatbuffers::Vector<int32_t>> ranks = 0) {
   MPIResponseBuilder builder_(_fbb);
+  builder_.add_ranks(ranks);
   builder_.add_tensor_sizes(tensor_sizes);
   builder_.add_devices(devices);
   builder_.add_error_message(error_message);
@@ -393,14 +419,16 @@ inline flatbuffers::Offset<MPIResponse> CreateMPIResponseDirect(
     const std::vector<flatbuffers::Offset<flatbuffers::String>> *tensor_names = nullptr,
     const char *error_message = nullptr,
     const std::vector<int32_t> *devices = nullptr,
-    const std::vector<int64_t> *tensor_sizes = nullptr) {
+    const std::vector<int64_t> *tensor_sizes = nullptr,
+    const std::vector<int32_t> *ranks = nullptr) {
   return horovod::common::wire::CreateMPIResponse(
       _fbb,
       response_type,
       tensor_names ? _fbb.CreateVector<flatbuffers::Offset<flatbuffers::String>>(*tensor_names) : 0,
       error_message ? _fbb.CreateString(error_message) : 0,
       devices ? _fbb.CreateVector<int32_t>(*devices) : 0,
-      tensor_sizes ? _fbb.CreateVector<int64_t>(*tensor_sizes) : 0);
+      tensor_sizes ? _fbb.CreateVector<int64_t>(*tensor_sizes) : 0,
+      ranks ? _fbb.CreateVector<int32_t>(*ranks) : 0);
 }
 
 }  // namespace wire
