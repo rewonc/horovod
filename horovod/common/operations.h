@@ -67,6 +67,14 @@ Status EnqueueTensorAllreduce(std::shared_ptr<OpContext> context,
                               const std::string name, const int device,
                               StatusCallback callback);
 
+Status EnqueueTensorReduce(std::shared_ptr<OpContext> context,
+                           std::shared_ptr<Tensor> tensor,
+                           std::shared_ptr<vector<int>> ranks,
+                           std::shared_ptr<Tensor> output,
+                           std::shared_ptr<ReadyEvent> ready_event,
+                           const std::string name, const int device,
+                           StatusCallback callback);
+
 Status EnqueueTensorAllgather(std::shared_ptr<OpContext> context,
                               std::shared_ptr<Tensor> tensor,
                               std::shared_ptr<ReadyEvent> ready_event,

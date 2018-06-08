@@ -40,7 +40,13 @@ from horovod.common import mpi_threads_supported
 
 from horovod.tensorflow.mpi_ops import allgather
 from horovod.tensorflow.mpi_ops import broadcast
-from horovod.tensorflow.mpi_ops import _allreduce
+from horovod.tensorflow.mpi_ops import _allreduce, _reduce
+
+
+
+def reduce(tensor, ranks):
+    return _reduce(tensor, ranks)
+
 
 
 def allreduce(tensor, average=True, device_dense='', device_sparse=''):

@@ -53,7 +53,8 @@ def _load_library(name, op_list=None):
 
 
 MPI_LIB = _load_library('mpi_lib' + get_ext_suffix(),
-                        ['HorovodAllgather', 'HorovodAllreduce'])
+                        ['HorovodAllgather', 'HorovodAllreduce', 'HorovodReduce'])
+                        # ['HorovodAllgather', 'HorovodAllreduce'])
 
 
 def _normalize_name(name):
@@ -76,8 +77,16 @@ def _allreduce(tensor, name=None):
         name = 'HorovodAllreduce_%s' % _normalize_name(tensor.name)
     return MPI_LIB.horovod_allreduce(tensor, name=name)
 
-
 ops.NotDifferentiable('HorovodAllreduce')
+
+
+def _reduce(tensor, ranks, name=None):
+    if name is None:
+        name = 'HorovodReduce_%s' % _normalize_name(tensor.name)
+    return MPI_LIB.horovod_reduce(tensor, ranks, name=name)
+
+ops.NotDifferentiable('HorovodReduce')
+
 
 
 def allgather(tensor, name=None):

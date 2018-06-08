@@ -271,6 +271,78 @@ TFReadyEvent* RecordReadyEvent(OpKernelContext* context) {
 
 } // namespace
 
+
+class HorovodReduceOp : public AsyncOpKernel {
+public:
+  explicit HorovodReduceOp(OpKernelConstruction* context)
+      : AsyncOpKernel(context) {
+        OP_REQUIRES_OK(context, context->GetAttr("ranks", &ranks_));
+        for (std::vector<int32>::const_iterator it = ranks_.begin(); it != ranks_.end(); ++it) {
+          std::cout << std::to_string(*it) << " ";
+        }
+        std::cout << std::endl;
+      }
+
+  void ComputeAsync(OpKernelContext* context, DoneCallback done) override {
+    OP_REQUIRES_OK_ASYNC(context, ConvertStatus(common::CheckInitialized()),
+                         done);
+
+    auto node_name = name();
+    auto device = GetDeviceID(context);
+    auto tensor = context->input(0);
+    auto ranks = ranks_;
+    Tensor* output;
+    OP_REQUIRES_OK_ASYNC(
+        context, context->allocate_output(0, tensor.shape(), &output), done);
+    // ReadyEvent makes sure input tensor is ready, and output is allocated.
+    auto ready_event = std::shared_ptr<TFReadyEvent>(RecordReadyEvent(context));
+    auto hvd_context = std::make_shared<TFOpContext>(context);
+    auto hvd_tensor = std::make_shared<TFTensor>(tensor);
+    auto hvd_output = std::make_shared<TFTensor>(*output);
+    auto hvd_ranks = std::make_shared<std::vector<int32>>(ranks);
+    auto enqueue_result = EnqueueTensorReduce(
+        hvd_context, hvd_tensor, hvd_ranks, hvd_output, ready_event, node_name, device,
+        [context, done](const common::Status& status) {
+          context->SetStatus(ConvertStatus(status));
+          done();
+        });
+    OP_REQUIRES_OK_ASYNC(context, ConvertStatus(enqueue_result), done);
+  }
+private:
+  std::vector<int32> ranks_;
+};
+
+REGISTER_KERNEL_BUILDER(Name("HorovodReduce").Device(DEVICE_CPU),
+                        HorovodReduceOp);
+#if HOROVOD_GPU_ALLREDUCE
+REGISTER_KERNEL_BUILDER(Name("HorovodReduce").Device(DEVICE_GPU),
+                        HorovodReduceOp);
+#endif
+
+REGISTER_OP("HorovodReduce")
+    .Attr("T: {int32, int64, float32, float64}")
+    .Attr("ranks: list(int) >= 2")
+    .Input("tensor: T")
+    .Output("sum: T")
+    .SetShapeFn([](shape_inference::InferenceContext* c) {
+      c->set_output(0, c->input(0));
+      return Status::OK();
+    })
+    .Doc(R"doc(
+Perform an MPI Reduce on a tensor. All the specified ranks must have a
+tensor of the same name and shape.
+
+Arguments
+    tensor:     A tensor to reduce.
+    ranks:      The ranks on which to perform the reduction.
+
+Output
+    sum:    A tensor with the same shape as `tensor`, summed across the given ranks.
+)doc");
+
+
+
+
 class HorovodAllreduceOp : public AsyncOpKernel {
 public:
   explicit HorovodAllreduceOp(OpKernelConstruction* context)

@@ -1575,6 +1575,46 @@ Status EnqueueTensorAllreduce(std::shared_ptr<OpContext> context,
   }
 }
 
+
+// MPI must be initialized and the background thread must be running before
+// this function is called.
+Status EnqueueTensorReduce(std::shared_ptr<OpContext> context,
+                           std::shared_ptr<Tensor> tensor,
+                           std::shared_ptr<vector<int>> ranks,
+                           std::shared_ptr<Tensor> output,
+                           std::shared_ptr<ReadyEvent> ready_event,
+                           const std::string name, const int device,
+                           StatusCallback callback) {
+  MPIRequest message;
+  message.set_request_rank(horovod_global.rank);
+  message.set_tensor_name(name);
+  message.set_tensor_type(tensor->dtype());
+  message.set_device(device);
+  message.set_request_type(MPIRequest::ALLREDUCE);
+  for (int i = 0; i < tensor->shape().dims(); i++) {
+    message.add_tensor_shape((int64_t)tensor->shape().dim_size(i));
+  }
+
+  TensorTableEntry e;
+  e.tensor_name = name;
+  e.context = context;
+  e.tensor = tensor;
+  e.output = output;
+  e.ready_event = ready_event;
+  e.device = device;
+  e.callback = callback;
+
+  std::lock_guard<std::mutex> guard(horovod_global.mutex);
+  if (!horovod_global.shut_down) {
+    horovod_global.tensor_table.emplace(name, std::move(e));
+    horovod_global.message_queue.push(message);
+    return Status::OK();
+  } else {
+    return SHUT_DOWN_ERROR;
+  }
+}
+
+
 // MPI must be initialized and the background thread must be running before
 // this function is called.
 Status EnqueueTensorAllgather(std::shared_ptr<OpContext> context,
