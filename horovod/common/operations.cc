@@ -180,6 +180,8 @@ struct HorovodGlobalState {
   std::unordered_map<std::vector<int32_t>, ncclComm_t> nccl_comms;
 #endif
 
+  std::unordered_map<std::vector<int32_t>, MPI_Comm> reduce_mpi_comms;
+
 // We reuse CUDA events as it appears that their creation carries non-zero cost.
 // Event management code is only used in NCCL path.
 #if HAVE_NCCL
@@ -223,7 +225,6 @@ static const Status SHUT_DOWN_ERROR = Status::Aborted(
 // ready to reduce the tensor).
 bool IncrementTensorCount(std::unique_ptr<MessageTable>& message_table,
                           MPIRequest msg, int mpi_size) {
-  std::cout << "IncrementTensorCount msg.size() " << std::to_string(msg.ranks().size()) << std::endl;
   auto name = msg.tensor_name();
   auto& timeline = horovod_global.timeline;
   auto table_iter = message_table->find(name);
@@ -246,8 +247,7 @@ bool IncrementTensorCount(std::unique_ptr<MessageTable>& message_table,
   // If its a local reduce, it just needs to be the size of the
   // ranks option
   if (msg.request_type() == MPIRequest::REDUCE) {
-    std::cout << "check: " << std::to_string(messages[0].ranks().size()) << " " << std::to_string(count) << std::endl;
-    ready_to_reduce = count == (int)messages[0].ranks().size();
+    ready_to_reduce = count == (int)msg.ranks().size();
   }
   if (ready_to_reduce) {
     timeline.NegotiateEnd(name);
@@ -445,6 +445,7 @@ MPIResponse ConstructMPIResponse(std::unique_ptr<MessageTable>& message_table,
     devices[it->request_rank()] = it->device();
   }
 
+  std::vector<int32_t> ranks(requests[0].ranks());
   MPIResponse response;
   response.add_tensor_names(name);
   if (error) {
@@ -464,6 +465,7 @@ MPIResponse ConstructMPIResponse(std::unique_ptr<MessageTable>& message_table,
     response.set_response_type(MPIResponse::BROADCAST);
   }
   response.set_devices(devices);
+  response.set_ranks(ranks);
 
   // Clear all queued up requests for this name. They are now taken care of
   // by the constructed MPI response.
@@ -1051,8 +1053,30 @@ void PerformOperation(TensorTable& tensor_table, MPIResponse response) {
       it->callback(Status::OK());
     }
 
+
+
+
+
+
+
   } else if (response.response_type() == MPIResponse::REDUCE) {
     auto first_entry = entries[0];
+    MPI_Comm reduce_mpi_comm;
+    auto got = horovod_global.reduce_mpi_comms.find(response.ranks());
+    if (got == horovod_global.reduce_mpi_comms.end()) {
+      MPI_Group world_group;
+      MPI_Comm_group(MPI_COMM_WORLD, &world_group);
+      MPI_Group new_group;
+      MPI_Group_incl(world_group, response.ranks().size(), response.ranks().data(), &new_group);
+      MPI_Comm new_comm;
+      MPI_CHECK(entries, "MPI_Comm_create_group", MPI_Comm_create_group(MPI_COMM_WORLD, new_group, 0, &new_comm))
+      horovod_global.reduce_mpi_comms[response.ranks()] = new_comm;
+      reduce_mpi_comm = new_comm;
+    } else {
+      reduce_mpi_comm = got->second;
+    }
+    
+
 #if HAVE_CUDA
     bool on_gpu = first_entry.device != CPU_DEVICE_ID;
     if (on_gpu) {
@@ -1085,6 +1109,7 @@ void PerformOperation(TensorTable& tensor_table, MPIResponse response) {
                             MPI_COMM_WORLD));
 
         ncclComm_t new_nccl_comm;
+        std::cout << "Executing ncclCommInit" << std::endl;
         NCCL_CHECK(entries, "ncclCommInitRank",
                    ncclCommInitRank(&new_nccl_comm, horovod_global.size,
                                     nccl_id, horovod_global.rank))
@@ -1133,6 +1158,7 @@ void PerformOperation(TensorTable& tensor_table, MPIResponse response) {
         for (auto it = entries.begin(); it != entries.end(); it++) {
           num_elements += it->tensor->shape().num_elements();
         }
+        std::cout << "Executing ncclAllReduce A" << std::endl;
         NCCL_CHECK(entries, "ncclAllReduce",
                    ncclAllReduce(buffer_data, (void*)buffer_data,
                                  (size_t)num_elements,
@@ -1158,6 +1184,7 @@ void PerformOperation(TensorTable& tensor_table, MPIResponse response) {
         }
       } else {
         auto e = first_entry;
+        std::cout << "Executing ncclAllReduce B" << std::endl;
         NCCL_CHECK(entries, "ncclAllReduce",
                    ncclAllReduce(e.tensor->data(),
                                  (void*)e.output->data(),
@@ -1277,6 +1304,7 @@ void PerformOperation(TensorTable& tensor_table, MPIResponse response) {
       for (auto it = entries.begin(); it != entries.end(); it++) {
         num_elements += it->tensor->shape().num_elements();
       }
+      std::cout << "Executing MPI_Allreduce A" << std::endl;
       MPI_CHECK(entries, "MPI_Allreduce",
                 MPI_Allreduce(MPI_IN_PLACE, (void*)buffer_data,
                               (int)num_elements,
@@ -1321,11 +1349,12 @@ void PerformOperation(TensorTable& tensor_table, MPIResponse response) {
       const void* sendbuf = e.tensor->data() == e.output->data()
                                 ? MPI_IN_PLACE
                                 : e.tensor->data();
+      std::cout << "Executing MPI_Allreduce B" << std::endl;
       MPI_CHECK(entries, "MPI_Allreduce",
                 MPI_Allreduce(sendbuf, (void*)e.output->data(),
                               (int)e.tensor->shape().num_elements(),
                               GetMPIDataType(e.tensor), MPI_SUM,
-                              MPI_COMM_WORLD))
+                              reduce_mpi_comm))
       ACTIVITY_END_ALL(entries, timeline)
     }
 
@@ -1539,7 +1568,6 @@ void BackgroundThreadLoop(HorovodGlobalState& state) {
         // Pop the first available message message
         MPIRequest message = message_queue.front();
         message_queue.pop();
-        std::cout << "First section" << std::endl;
         bool reduce = IncrementTensorCount(state.message_table, message, size);
         if (reduce) {
           ready_to_reduce.push_back(message.tensor_name());
@@ -1597,7 +1625,6 @@ void BackgroundThreadLoop(HorovodGlobalState& state) {
         for (auto& received_message : received_message_list.requests()) {
           auto received_name = received_message.tensor_name();
 
-          std::cout << "Second section" << std::endl;
 
           bool reduce =
               IncrementTensorCount(state.message_table, received_message, size);
@@ -1662,13 +1689,31 @@ void BackgroundThreadLoop(HorovodGlobalState& state) {
         // Notify all nodes which tensors we'd like to reduce at this step.
         std::string encoded_response;
         MPIResponse::SerializeToString(response, encoded_response);
+        MPIResponse unencoded;
+        MPIResponse::ParseFromString(unencoded, encoded_response);
         for (int r = 1; r < size; r++) {
+          // if (response.response_type() == MPIResponse::REDUCE) {
+          //   if (response.ranks().size() > 0) {
+          //     std::cout << "NOERR - Sending REDUCE with |ranks| > 0 on rank " << std::to_string(horovod_global.rank) << std::endl;
+          //     std::cout << "Reencoded size " << std::to_string(unencoded.ranks().size()) << std::endl;
+          //   } else {
+          //     std::cout << "ERR! Sending REDUCE with |ranks| == 0 on rank " << std::to_string(horovod_global.rank) << std::endl;
+          //   }
+          // }
+
           MPI_Send(encoded_response.c_str(), (int)encoded_response.length() + 1,
                    MPI_BYTE, r, TAG_NOTIFY, MPI_COMM_WORLD);
         }
 
         // Perform the collective operation. All nodes should end up performing
         // the same operation.
+        // if (response.response_type() == MPIResponse::REDUCE) {
+        //   if (response.ranks().size() > 0) {
+        //     std::cout << "NOERR - Processing REDUCE with |ranks| > 0 on rank " << std::to_string(horovod_global.rank) << std::endl;
+        //   } else {
+        //     std::cout << "ERR! Processing REDUCE with |ranks| == 0 on rank " << std::to_string(horovod_global.rank) << std::endl;
+        //   }
+        // }
         PerformOperation(state.tensor_table, response);
       }
 
@@ -1734,6 +1779,14 @@ void BackgroundThreadLoop(HorovodGlobalState& state) {
           break;
         } else {
           // Process the current message
+          if (response.response_type() == MPIResponse::REDUCE) {
+            if (response.ranks().size() > 0) {
+              std::cout << "NOERR - Processing REDUCE with |ranks| > 0 on rank " << std::to_string(horovod_global.rank) << std::endl;
+            } else {
+              std::cout << "ERR! Processing REDUCE with |ranks| == 0 on rank " << std::to_string(horovod_global.rank) << std::endl;
+            }
+          }
+
           PerformOperation(state.tensor_table, response);
         }
       }
@@ -1894,8 +1947,6 @@ Status EnqueueTensorReduce(std::shared_ptr<OpContext> context,
   for (int i = 0; i < tensor->shape().dims(); i++) {
     message.add_tensor_shape((int64_t)tensor->shape().dim_size(i));
   }
-
-  std::cout << "size in enqueuetensorreduce: " << std::to_string(message.ranks().size()) << std::endl;
 
   TensorTableEntry e;
   e.tensor_name = name;

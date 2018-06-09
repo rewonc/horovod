@@ -327,10 +327,13 @@ void MPIResponse::ParseFromString(MPIResponse& response,
       std::vector<int32_t>(obj->devices()->begin(), obj->devices()->end()));
   response.set_tensor_sizes(std::vector<int64_t>(obj->tensor_sizes()->begin(),
                                                  obj->tensor_sizes()->end()));
+  response.set_ranks(std::vector<int32_t>(obj->ranks()->begin(),
+                                          obj->ranks()->end()));
 }
 
 void MPIResponse::SerializeToString(MPIResponse& response,
                                     std::string& output) {
+
   flatbuffers::FlatBufferBuilder builder(1024);
   wire::MPIResponseBuilder response_builder(builder);
   response_builder.add_response_type(
@@ -342,6 +345,8 @@ void MPIResponse::SerializeToString(MPIResponse& response,
   response_builder.add_devices(builder.CreateVector(response.devices()));
   response_builder.add_tensor_sizes(
       builder.CreateVector(response.tensor_sizes()));
+  response_builder.add_ranks(
+      builder.CreateVector(response.ranks()));
   auto obj = response_builder.Finish();
   builder.Finish(obj);
 
