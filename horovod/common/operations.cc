@@ -1691,18 +1691,24 @@ void BackgroundThreadLoop(HorovodGlobalState& state) {
         MPIResponse::SerializeToString(response, encoded_response);
         MPIResponse unencoded;
         MPIResponse::ParseFromString(unencoded, encoded_response);
-        for (int r = 1; r < size; r++) {
-          // if (response.response_type() == MPIResponse::REDUCE) {
-          //   if (response.ranks().size() > 0) {
-          //     std::cout << "NOERR - Sending REDUCE with |ranks| > 0 on rank " << std::to_string(horovod_global.rank) << std::endl;
-          //     std::cout << "Reencoded size " << std::to_string(unencoded.ranks().size()) << std::endl;
-          //   } else {
-          //     std::cout << "ERR! Sending REDUCE with |ranks| == 0 on rank " << std::to_string(horovod_global.rank) << std::endl;
-          //   }
+        if (response.response_type() == MPIResponse::REDUCE) {
+          // if (response.ranks().size() > 0) {
+          //   std::cout << "NOERR - Sending REDUCE with |ranks| > 0 on rank " << std::to_string(horovod_global.rank) << std::endl;
+          //   std::cout << "Reencoded size " << std::to_string(unencoded.ranks().size()) << std::endl;
+          // } else {
+          //   std::cout << "ERR! Sending REDUCE with |ranks| == 0 on rank " << std::to_string(horovod_global.rank) << std::endl;
           // }
-
-          MPI_Send(encoded_response.c_str(), (int)encoded_response.length() + 1,
-                   MPI_BYTE, r, TAG_NOTIFY, MPI_COMM_WORLD);
+          for (auto it = response.ranks().begin(); it != response.ranks().end(); it++) {
+            if (*it != 0) {
+              MPI_Send(encoded_response.c_str(), (int)encoded_response.length() + 1,
+                       MPI_BYTE, *it, TAG_NOTIFY, MPI_COMM_WORLD);
+            }
+          }
+        } else {
+          for (int r = 1; r < size; r++) {
+            MPI_Send(encoded_response.c_str(), (int)encoded_response.length() + 1,
+                     MPI_BYTE, r, TAG_NOTIFY, MPI_COMM_WORLD);
+          }
         }
 
         // Perform the collective operation. All nodes should end up performing
