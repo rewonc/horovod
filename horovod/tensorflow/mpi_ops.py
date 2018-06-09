@@ -83,7 +83,8 @@ ops.NotDifferentiable('HorovodAllreduce')
 def _reduce(tensor, ranks, name=None):
     if name is None:
         name = 'HorovodReduce_%s' % _normalize_name(tensor.name)
-    return MPI_LIB.horovod_reduce(tensor, ranks, name=name)
+    # We sort the ranks because the first one will be the coordinator.
+    return MPI_LIB.horovod_reduce(tensor, sorted(ranks), name=name)
 
 ops.NotDifferentiable('HorovodReduce')
 

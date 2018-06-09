@@ -37,7 +37,7 @@ Status CheckInitialized();
 extern "C" {
 
 // C interface to initialize Horovod.
-void horovod_init();
+void horovod_init(int vals[], int lens[], int vlen, int llen);
 
 // C interface to get index of current Horovod process.
 // Returns -1 if Horovod is not initialized.

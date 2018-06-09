@@ -37,10 +37,18 @@ MPI_COMMON_LIB_CTYPES = \
                              'mpi_lib' + get_ext_suffix()), mode=ctypes.RTLD_GLOBAL)
 
 
-def init():
+def init(reduce_groups=None):
     """A function that initializes Horovod.
     """
-    return MPI_COMMON_LIB_CTYPES.horovod_init()
+    vals = []
+    lens = []
+    for g in reduce_groups:
+        vals.extend(g)
+        lens.append(len(g))
+    # print(vals, lens)
+    vals_arr = (ctypes.c_int * len(vals))(*vals)
+    lens_arr = (ctypes.c_int * len(lens))(*lens)
+    return MPI_COMMON_LIB_CTYPES.horovod_init(vals_arr, lens_arr, len(vals), len(lens))
 
 
 def size():

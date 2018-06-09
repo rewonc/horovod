@@ -281,7 +281,7 @@ public:
         // for (std::vector<int32>::const_iterator it = ranks_.begin(); it != ranks_.end(); ++it) {
         //   std::cout << std::to_string(*it) << " ";
         // }
-        // std::cout << std::endl;
+      // std::cout << std::endl;
       }
 
   void ComputeAsync(OpKernelContext* context, DoneCallback done) override {
